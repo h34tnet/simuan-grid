@@ -1,0 +1,187 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN"
+    "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+<title>simuan-grid</title>
+
+<script src="jquery-1.4.min.js" type="text/javascript"></script>
+<script src="simuan-grid.js" type="text/javascript"></script>
+
+<script type="text/javascript">
+    var test_images = ['images/woman.png', 'images/ocean.png', 'images/silhouette.png', 'images/soapstone.png', 'images/soapstone_filter.png'];
+
+
+    $(document).ready(function () {
+        // test images
+        for (var i=0; i<test_images.length; i++)
+            $('#set_imageurl').append('<option>' + test_images[i] + '</option>');
+
+        $('#set_displaycctx').click(function () {
+            $('#curCanv').toggle();
+        });
+
+        $('#goBtn').click(function () {
+            var 
+                set_imageurl    = $('#set_imageurl').val(),
+                set_rasterSize  = parseInt($('#set_rastersize').val()),
+                $set_pmutation  = $('#set_pmutation'),
+                $set_cmutation  = $('#set_cmutation'),
+                set_displaycctx = $('#set_displaycctx').get(0).checked,
+                set_stopatgen   = parseInt($('#set_stopatgen').val());
+
+            // set startup controls inaccessible - too late for any changes!
+            $('#controlsStartup INPUT, #controlsStartup SELECT').attr('disabled', true);
+
+
+            var img = new Image();
+
+            img.onerror = function () {
+                alert('Can\'t load image.');
+            }
+
+            // the image onload-event starts processing
+            img.onload = function () {
+                // first, create the canvasses and get their handles
+                // the "current" canvas, that is used to test potential candidates isn't displayed
+                // hopefully that speeds up computation
+                // actually: no, it doesn't
+                $('#display').append([
+                    '<div>', 
+                    '<canvas id="imgCanv" width="256" height="256"></canvas>',
+                    '<canvas id="bstCanv" width="256" height="256"></canvas>',
+                    '<canvas id="curCanv" width="256" height="256" style="display: ' + (set_displaycctx ? 'inline' : 'none') + ';"></canvas>',
+                    '</div>'].join(''));
+
+                var iCtx = $('#imgCanv').get(0).getContext('2d'),
+                    cCtx = $('#curCanv').get(0).getContext('2d'),
+                    bCtx = $('#bstCanv').get(0).getContext('2d'),
+                    $ipgen    = $('#generation'), 
+                    $ipimp    = $('#improvements'), 
+                    $ipscore  = $('#score'), 
+                    $ipscorep = $('#scorep'), 
+                    $ipperf   = $('#performance'),
+                    $ipperfot = $('#perfot'),
+                    $timep    = $('#timep');
+
+                // draw the original image, so we can compare to it
+                iCtx.drawImage(img, 0, 0, 256, 256);
+
+                // generate the initial grid, with colors roughly matching 
+                // the original image (looks like a mosaic)
+                var father   = generateRandomPolyCollection(256, set_rasterSize, iCtx),
+                    bFitness = getFitness(bCtx, father, iCtx),
+
+                    // save the original fitness for parameter performance comparison
+                    iFitness = bFitness;
+
+
+                var 
+                    generation = 0,
+                    improvements = 0,
+                    startTime = (new Date()).getTime();
+
+                
+                var iterate = function () {
+                    generation += 1;
+                    
+                    // clone the "father"
+                    var son = clone(father);
+
+                    // now, with a 50% chance, either slightly change 
+                    // the position of a point or a color
+                    if (Math.random() < 0.5)
+                        mutatePolyCollectionPoints(son, $set_pmutation.val());
+                    else
+                        mutatePolyCollectionColors(son, $set_cmutation.val());
+                        
+                    var fitness = getFitness(cCtx, son, iCtx);
+
+                    // if the new fitness is better than the 
+                    if (fitness < bFitness) {
+                        // draw new image
+                        drawPolyCollection(bCtx, son);
+                        bFitness = fitness;
+                        improvements += 1;
+
+                        // statistics
+                        $ipgen.val(generation);
+                        $ipscore.val(bFitness);
+
+                        $ipscorep.val(Math.floor((50331648-bFitness)/50331648 * 100) + '%');
+                        $ipimp.val(improvements);
+
+                        // the son is the new father
+                        father = son;
+                    }
+
+                    // update performance statistics
+                    if (generation % 10 == 0) {
+                        var curTime = (new Date()).getTime();
+                        $ipperf.val(Math.floor((curTime - startTime) / generation) + 'ms/gen');
+
+                        var scoreInc = iFitness-bFitness;
+                        $ipperfot.val(Math.floor(scoreInc/generation));
+                    }
+
+                    $timep.val(Math.floor(((new Date()).getTime()-startTime))/1000 + 'sec');
+
+                    // "looping" is done via settimeout 
+                    // so the browser doesn't become unresponsible
+                    // if a target generation is reached, stop
+                    if (set_stopatgen == 0 || set_stopatgen > generation)
+                        window.setTimeout(iterate, 5);
+                }
+                
+
+                // start the action
+                iterate();
+            }
+
+            // load an image (must be 256x256)
+            img.src = set_imageurl;
+        });
+
+    });
+</script>
+
+<style type="text/css">
+CANVAS {
+    border: 3px double black;
+    margin: 4px;
+}
+</style>
+</head>
+<body>
+    <h1>Simulated annealing image optimization</h1>
+
+    <fieldset id="controlsStartup"><legend>startup parameters</legend>
+        <div style="float:left;">Image:<br/>                <select id="set_imageurl"></select></div>
+        <div style="float:left;">Raster size:<br/>          <input type="text"   id="set_rastersize" value="16"></div>
+        <div style="float:left;">Stop at generation:<br/>   <input type="text"   id="set_stopatgen"  value="1000"></div>
+        <div style="float:left;">Start:<br/>                <input type="button" id="goBtn"          value="start"></div>
+    </fieldset><div style="clear: both;"></div>
+
+    <fieldset><legend>mutation parameters (adjustable while running) & display</legend>
+        <div style="float:left;">Point mutation:<br/>       <input type="text" id="set_pmutation"   value="8"></div>
+        <div style="float:left;">Color mutation:<br/>       <input type="text" id="set_cmutation"   value="4"></div>
+        <div style="float:left;"><br/><input type="checkbox" id="set_displaycctx" value="y"> <label for="set_displaycctx">Display canditates</label> </div>
+    </fieldset><div style="clear: both;"></div>
+
+    <fieldset><legend>monitoring</legend>
+        <div style="float:left;">Generation:<br/>       <input type="text" value="" id="generation"   readonly disabled></div>
+        <div style="float:left;">Improvements:<br/>     <input type="text" value="" id="improvements" readonly disabled></div>
+        <div style="float:left;">Score:<br/>            <input type="text" value="" id="score"        readonly disabled></div>
+        <div style="float:left;">Score %:<br/>          <input type="text" value="" id="scorep"       readonly disabled></div>
+        <div style="float:left;">Performance:<br/>      <input type="text" value="" id="performance"  readonly disabled></div>
+        <div style="float:left;">Score inc/Generation:<br/>  <input type="text" value="" id="perfot"  readonly disabled></div>
+        <div style="float:left;">Time passed:<br/>      <input type="text" value="" id="timep"        readonly disabled></div>
+    </fieldset><div style="clear: both;"></div>
+
+    <fieldset id="fsdisplay"><legend>Display</legend>
+        <div id="display"></div>
+    </fieldset>
+
+    
+</body>
+</html>
